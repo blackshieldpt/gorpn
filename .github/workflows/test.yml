@@ -34,6 +34,7 @@ jobs:
         with:
           name: coverage-${{ matrix.go-version }}
           path: coverage.out
+          retention-days: 7
 
   benchmark:
     name: Benchmark
