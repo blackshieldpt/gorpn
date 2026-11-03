@@ -6,12 +6,13 @@ import (
 	"strconv"
 )
 
-// Function represents a custom function that can be registered with the calculator
+// Function describes a function an expression can call: the built-ins, and
+// custom functions passed to EvalWithFunctions.
 type Function struct {
-	// ArgCount is the number of arguments the function takes
-	// Use -1 for variadic functions (variable number of arguments)
+	// ArgCount is the number of arguments the function takes, or -1 for any
+	// number (variadic).
 	ArgCount int
-	// Fn is the actual function implementation
+	// Fn computes the result from the arguments.
 	Fn func(args []float64) (float64, error)
 }
 
@@ -277,7 +278,7 @@ func evaluateRPNWithArgCounts(tokens []token, argCounts map[int]int, vars map[st
 				if len(stack) < 1 {
 					return 0, fmt.Errorf("insufficient operands for operator: -")
 				}
-				// 0 - v, not -v: keeps the old result of +0 (not -0) for -x when x is 0
+				// 0 - v, not -v, so -x is +0 rather than -0 when x is 0
 				stack[len(stack)-1] = 0 - stack[len(stack)-1]
 				continue
 			}
@@ -316,13 +317,13 @@ func evaluateRPNWithArgCounts(tokens []token, argCounts map[int]int, vars map[st
 				return 0, fmt.Errorf("undefined function: %s", token.Value)
 			}
 
-			// Get argument count from the map
+			// The parser records an argument count for every call it emits, so the
+			// fallback below only guards the evaluator's own contract
 			argCount, hasArgCount := argCounts[i]
 			if !hasArgCount {
-				// Fallback to function's declared arg count
 				argCount = fn.ArgCount
 				if argCount == -1 {
-					argCount = len(stack) // Use all stack for variadic without explicit count
+					argCount = len(stack)
 				}
 			}
 

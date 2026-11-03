@@ -11,7 +11,7 @@ import (
 )
 
 func main() {
-	// Create a github.com/blackshieldpt/gorpn instance
+	// Create a Calculator
 	calc := gorpn.New()
 
 	// Register custom functions
@@ -46,7 +46,7 @@ func main() {
 
 	// Demo 7: Interactive REPL
 	fmt.Println("\n=== Interactive Mode ===")
-	fmt.Println("Enter expressions (type 'quit' to exit, 'vars' to see variables)")
+	fmt.Println("Enter expressions (type 'help' for commands, 'quit' or 'exit' to leave)")
 	fmt.Println("Set variables: x = 5")
 	fmt.Println()
 	repl(calc)
@@ -141,7 +141,7 @@ func registerCustomFunctions(calc *gorpn.Calculator) {
 		return math.Sqrt((x2-x1)*(x2-x1) + (y2-y1)*(y2-y1) + (z2-z1)*(z2-z1)), nil
 	})
 
-	// Quadratic formula (returns one root, use -b for other)
+	// Quadratic formula: the + root (quadm gives the - root)
 	calc.RegisterFunction("quadp", 3, func(args []float64) (float64, error) {
 		a, b, c := args[0], args[1], args[2]
 		discriminant := b*b - 4*a*c
@@ -292,11 +292,12 @@ func demo6(calc *gorpn.Calculator) {
 	result, _ := calc.EvaluateWithVars("sqrt(a^2 + b^2)", map[string]float64{"a": 3, "b": 4})
 	fmt.Printf("  Pythagorean (a=3, b=4): c = %g\n", result)
 
-	// Quadratic formula components
-	calc.SetVariables(map[string]float64{"a": 1, "b": -5, "c": 6})
-	result, _ = calc.Evaluate("(-b + sqrt(b^2 - 4*a*c)) / (2*a)")
+	// Quadratic formula components, passed per call so they don't replace
+	// the calculator's c (speed of light)
+	quad := map[string]float64{"a": 1, "b": -5, "c": 6}
+	result, _ = calc.EvaluateWithVars("(-b + sqrt(b^2 - 4*a*c)) / (2*a)", quad)
 	fmt.Printf("  Quadratic formula x₁ = %g\n", result)
-	result, _ = calc.Evaluate("(-b - sqrt(b^2 - 4*a*c)) / (2*a)")
+	result, _ = calc.EvaluateWithVars("(-b - sqrt(b^2 - 4*a*c)) / (2*a)", quad)
 	fmt.Printf("  Quadratic formula x₂ = %g\n", result)
 
 	// Compound interest: A = P(1 + r/n)^(nt)
@@ -398,16 +399,17 @@ func printHelp() {
 	fmt.Println(`
 Available operations:
   Operators: + - * / ^ %
-  Constants: pi, e, phi, gravity, c
+  Constants: pi, e, phi
+  Variables: gravity, c (speed of light), mass
 
 Built-in functions:
   Trig: sin, cos, tan, asin, acos, atan, atan2, sinh, cosh, tanh
-  Math: sqrt, cbrt, abs, ceil, floor, round, trunc, exp, log, log10, log2, pow
+  Math: sqrt, cbrt, abs, ceil, floor, round, trunc, exp, exp2, log, log10, log2, pow, hypot, mod
   Stats: min, max, avg, sum (variadic)
 
 Custom functions:
   f2c(f), c2f(c)       - Temperature conversion
-  deg(r), rad(d)       - Angle conversion
+  deg(d), rad(r)       - Degrees to radians, radians to degrees
   clamp(v, min, max)   - Clamp value
   lerp(a, b, t)        - Linear interpolation
   map(v, i1, i2, o1, o2) - Map range
@@ -419,7 +421,7 @@ Custom functions:
   quadm(a,b,c)         - Quadratic - root
 
 Commands:
-  vars  - Show variables
+  vars  - Show variables set in this session
   help  - Show this help
-  quit  - Exit`)
+  quit  - Exit (or exit)`)
 }
