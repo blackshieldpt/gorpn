@@ -202,30 +202,56 @@ var builtinConstants = map[string]float64{
 	"PHI": math.Phi,
 }
 
-// evaluateRPNWithArgCounts evaluates an RPN expression with explicit argument counts for functions
-func evaluateRPNWithArgCounts(tokens []token, argCounts map[int]int, variables map[string]float64, customFunctions map[string]Function) (float64, error) {
+// resolvedFunc is a function as one evaluation sees it
+type resolvedFunc struct {
+	Function
+	custom bool // registered by the caller, not built in
+}
+
+// resolve looks up the variables and functions the expression names, once,
+// before evaluation starts. Variables resolve from callVars, then calcVars,
+// then built-in constants; functions from customFns, then built-ins. User names
+// override built-ins on purpose. Resolving up front, rather than reading the
+// live maps during evaluation, means a custom function that changes the
+// Calculator or callVars mid-evaluation can't affect later lookups. Names not
+// found are left out, so evaluation reports them when it reaches them.
+func resolve(tokens []token, callVars, calcVars map[string]float64, customFns map[string]Function) (map[string]float64, map[string]resolvedFunc) {
+	vars := make(map[string]float64)
+	functions := make(map[string]resolvedFunc)
+	for _, tok := range tokens {
+		switch tok.Type {
+		case tokenVariable:
+			if _, done := vars[tok.Value]; done {
+				continue
+			}
+			if v, ok := callVars[tok.Value]; ok {
+				vars[tok.Value] = v
+			} else if v, ok := calcVars[tok.Value]; ok {
+				vars[tok.Value] = v
+			} else if v, ok := builtinConstants[tok.Value]; ok {
+				vars[tok.Value] = v
+			}
+		case tokenFunction:
+			if _, done := functions[tok.Value]; done {
+				continue
+			}
+			if fn, ok := customFns[tok.Value]; ok {
+				functions[tok.Value] = resolvedFunc{Function: fn, custom: true}
+			} else if fn, ok := builtinFunctions[tok.Value]; ok {
+				functions[tok.Value] = resolvedFunc{Function: fn}
+			}
+		}
+	}
+	return vars, functions
+}
+
+// evaluateRPNWithArgCounts evaluates an RPN expression with explicit argument
+// counts for functions. vars and functions come from resolve.
+func evaluateRPNWithArgCounts(tokens []token, argCounts map[int]int, vars map[string]float64, functions map[string]resolvedFunc) (float64, error) {
 	var stack []float64
 	// Set when the caller supplies NaN or ±Inf, through a variable or a custom
 	// function; the result is then passed through unchecked
 	callerNonFinite := false
-
-	// Merge builtin constants with user variables (user variables take precedence)
-	vars := make(map[string]float64)
-	for k, v := range builtinConstants {
-		vars[k] = v
-	}
-	for k, v := range variables {
-		vars[k] = v
-	}
-
-	// Merge builtin functions with custom functions (custom take precedence)
-	functions := make(map[string]Function)
-	for k, v := range builtinFunctions {
-		functions[k] = v
-	}
-	for k, v := range customFunctions {
-		functions[k] = v
-	}
 
 	for i, token := range tokens {
 		switch token.Type {
@@ -321,7 +347,7 @@ func evaluateRPNWithArgCounts(tokens []token, argCounts map[int]int, variables m
 			if err != nil {
 				return 0, fmt.Errorf("error in function %s: %w", token.Value, err)
 			}
-			if _, custom := customFunctions[token.Value]; custom && !isFinite(result) && allFinite(args) {
+			if fn.custom && !isFinite(result) && allFinite(args) {
 				callerNonFinite = true
 			}
 			stack = append(stack, result)
