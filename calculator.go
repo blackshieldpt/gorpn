@@ -4,13 +4,13 @@ import (
 	"fmt"
 )
 
-// Calculator is the main entry point for expression evaluation
+// Calculator holds variables and custom functions for evaluating expressions.
 type Calculator struct {
 	variables map[string]float64
 	functions map[string]Function
 }
 
-// New creates a new Calculator instance
+// New creates a Calculator with no variables or custom functions.
 func New() *Calculator {
 	return &Calculator{
 		variables: make(map[string]float64),
@@ -18,24 +18,27 @@ func New() *Calculator {
 	}
 }
 
-// SetVariable sets a variable value
+// SetVariable sets a variable. It overrides a built-in constant of the same name.
 func (c *Calculator) SetVariable(name string, value float64) {
 	c.variables[name] = value
 }
 
-// SetVariables sets multiple variables at once
+// SetVariables sets multiple variables at once.
 func (c *Calculator) SetVariables(vars map[string]float64) {
 	for k, v := range vars {
 		c.variables[k] = v
 	}
 }
 
-// ClearVariables removes all user-defined variables
+// ClearVariables removes all variables set on the Calculator. Custom functions are kept.
 func (c *Calculator) ClearVariables() {
 	c.variables = make(map[string]float64)
 }
 
-// RegisterFunction registers a custom function
+// RegisterFunction registers a custom function. argCount is the exact number
+// of arguments it takes, or -1 for any number; any other negative value makes
+// every call fail. The count is checked when an expression calls the function.
+// A custom function overrides a built-in function of the same name.
 func (c *Calculator) RegisterFunction(name string, argCount int, fn func(args []float64) (float64, error)) {
 	c.functions[name] = Function{
 		ArgCount: argCount,
@@ -43,7 +46,7 @@ func (c *Calculator) RegisterFunction(name string, argCount int, fn func(args []
 	}
 }
 
-// Evaluate evaluates an expression and returns the result
+// Evaluate evaluates an expression with the Calculator's variables and functions.
 func (c *Calculator) Evaluate(expression string) (float64, error) {
 	return c.EvaluateWithVars(expression, nil)
 }
@@ -104,17 +107,20 @@ func (e *Expr) Eval(vars map[string]float64) (float64, error) {
 	return result, nil
 }
 
-// Eval is a convenience function for one-off evaluation without creating a Calculator
+// Eval evaluates an expression once, with built-in functions and constants and
+// the given variables, without creating a Calculator.
 func Eval(expression string, vars map[string]float64) (float64, error) {
 	calc := New()
 	return calc.EvaluateWithVars(expression, vars)
 }
 
-// EvalWithFunctions evaluates an expression with variables and custom functions
+// EvalWithFunctions evaluates an expression once, with the given variables and
+// custom functions. Custom functions override built-in functions of the same
+// name. The functions map is read, not copied, so don't modify it concurrently.
 func EvalWithFunctions(expression string, vars map[string]float64, functions map[string]Function) (float64, error) {
 	calc := New()
-	// No copy needed: nothing else can reach calc to modify the map, and
-	// evaluation only reads it
+	// No copy needed: evaluation only reads the map, and each evaluation looks
+	// up the names it needs before any function runs
 	calc.functions = functions
 	return calc.EvaluateWithVars(expression, vars)
 }

@@ -91,10 +91,6 @@ func shuntingYardWithArgCounts(tokens []token) ([]token, map[int]int, error) {
 
 		case tokenLeftParen:
 			operatorStack = append(operatorStack, token)
-			// If this isn't a function call, push dummy values to stacks
-			if len(operatorStack) < 2 || operatorStack[len(operatorStack)-2].Type != tokenFunction {
-				// Not a function call, just grouping parentheses
-			}
 
 		case tokenRightParen:
 			// Pop operators until we find the matching left parenthesis

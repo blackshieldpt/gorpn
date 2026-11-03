@@ -97,8 +97,9 @@ func (t *tokenizer) readIdentifier() string {
 	return t.input[start:t.pos]
 }
 
-// opNegate is the operator value for unary minus. The tokenizer creates it;
-// it never appears in input text, so it can't clash with a binary operator.
+// opNegate is the operator value for unary minus. Only the tokenizer creates
+// operator tokens with this value, so it can't clash with a binary operator
+// (an identifier named neg is a variable or function token, not an operator).
 const opNegate = "neg"
 
 func isOperator(ch rune) bool {

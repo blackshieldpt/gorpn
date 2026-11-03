@@ -18,6 +18,7 @@ A Go package for evaluating mathematical expressions using the Shunting Yard alg
 - **Built-in functions**: 29 mathematical functions
 - **Custom functions**: Register your own functions (fixed or variadic arguments)
 - **Scientific notation**: `1.5e-3`, `2E10`
+- **Compiled expressions**: parse once, evaluate many times
 
 ## Installation
 
@@ -54,13 +55,15 @@ func main() {
 ```go
 // One-off evaluation
 result, err := gorpn.Eval("(2 + 3) * 4", nil)
+fmt.Println(result, err) // 20 <nil>
 
 // With variables
-result, err := gorpn.Eval("x * y + z", map[string]float64{
+result, err = gorpn.Eval("x * y + z", map[string]float64{
     "x": 10,
     "y": 20,
     "z": 5,
 })
+fmt.Println(result, err) // 205 <nil>
 ```
 
 ### Calculator Instance
@@ -75,6 +78,7 @@ calc.SetVariables(map[string]float64{"mass": 70, "height": 1.75})
 // Evaluate multiple expressions
 force, _ := calc.Evaluate("mass * gravity")
 bmi, _ := calc.Evaluate("mass / height^2")
+fmt.Println(force, bmi) // 686.7 22.857142857142858
 
 // Clear variables
 calc.ClearVariables()
@@ -82,11 +86,13 @@ calc.ClearVariables()
 
 ### Name Resolution
 
-A name in an expression resolves in this order: variables passed to the call (`EvaluateWithVars`, `Eval`, `Expr.Eval`), then the Calculator's variables, then the built-in constants. So a variable named `pi`, `e` or `phi` overrides the constant. Custom functions override built-in functions of the same name.
+A name in an expression resolves in this order: variables passed to the call (`EvaluateWithVars`, `Eval`, `EvalWithFunctions`, `Expr.Eval`), then the Calculator's variables, then the built-in constants. So a variable named `pi`, `e` or `phi` overrides the constant. Custom functions override built-in functions of the same name.
 
 Each evaluation looks names up once, when it starts. A custom function that changes the Calculator (`SetVariable`, `ClearVariables`, `RegisterFunction`) or the `vars` map mid-evaluation doesn't affect the rest of that evaluation. The next evaluation sees the change.
 
-A Calculator is not safe for concurrent use while it is being modified. Concurrent evaluations are fine as long as nothing changes the Calculator or the `vars` maps they use at the same time.
+A Calculator is not safe for concurrent use while it is being modified. Concurrent evaluations are fine as long as nothing changes the Calculator, or the `vars` and `functions` maps they use, at the same time.
+
+Names are ASCII letters, digits and underscores, and can't start with a digit. Positions in error messages are 0-based byte offsets.
 
 ### Compiled Expressions
 
@@ -98,15 +104,19 @@ calc.SetVariable("rate", 0.23)
 
 expr, err := calc.Compile("price * (1 + rate)")
 if err != nil {
-    // "tokenization error: ..." or "parsing error: ..."
+    // syntax error: "tokenization error: ..." or "parsing error: ..."
 }
-for _, price := range prices {
+for _, price := range []float64{10, 20, 30} {
     total, err := expr.Eval(map[string]float64{"price": price})
-    // ...
+    if err != nil {
+        // "evaluation error: ...", including invalid numbers such as 1e400
+        // and undefined variables or functions
+    }
+    fmt.Println(total)
 }
 ```
 
-`c.Compile(expr)` followed by `Eval(vars)` gives the same result as `c.EvaluateWithVars(expr, vars)`. Each `Eval` sees the Calculator's variables and functions as they are when it starts. The package-level `gorpn.Compile` uses built-in functions and constants only. An `*Expr` never changes after `Compile`, so goroutines can share it.
+`c.Compile(expr)` followed by `Eval(vars)` gives the same result as `c.EvaluateWithVars(expr, vars)`. Each `Eval` sees the Calculator's variables and functions as they are when it starts. The package-level `gorpn.Compile` uses built-in functions and constants only. An `*Expr` never changes after `Compile`, so goroutines can share it as long as nothing modifies the Calculator at the same time.
 
 ### Custom Functions
 
@@ -152,8 +162,11 @@ funcs := map[string]gorpn.Function{
     },
 }
 
-result, _ := gorpn.EvalWithFunctions("fahrenheit(100)", nil, funcs) // 212
+result, err := gorpn.EvalWithFunctions("fahrenheit(100)", nil, funcs)
+fmt.Println(result, err) // 212 <nil>
 ```
+
+`RegisterFunction` and `EvalWithFunctions` take an exact argument count, or `-1` for any number. Any other negative count makes every call fail. A custom function overrides a built-in function of the same name.
 
 ## Operators
 
@@ -189,17 +202,17 @@ Unary `-` and `+` work anywhere an operand can start: `-5 + 3`, `-(2 + 3)`, `2 *
 `log` (natural), `log10`, `log2`
 
 ### Rounding
-`abs`, `ceil`, `floor`, `round`, `trunc`
+`ceil`, `floor`, `round`, `trunc`
 
 ### Other
-`hypot`, `mod`
+`abs`, `hypot`, `mod`
 
 ### Variadic
-`min`, `max`, `avg`, `sum`
+`min`, `max`, `avg`, `sum`. With no arguments, `sum()` is `0`; `min`, `max` and `avg` return an error.
 
 ## Examples
 
-```go
+```
 // Operator precedence
 "2 + 3 * 4"          // 14 (not 20)
 "2 ^ 3 ^ 2"          // 512 (2^9, right-associative)
@@ -222,18 +235,26 @@ Unary `-` and `+` work anywhere an operand can start: `-5 + 3`, `-(2 + 3)`, `2 *
 
 ## Algorithm
 
-The package uses a two-phase approach:
+An expression goes through four steps. `Compile` runs the first two once; each evaluation runs the last two.
 
-### 1. Shunting Yard Algorithm
+### 1. Tokenizing
 
-Converts infix notation to Reverse Polish Notation (postfix):
+Splits the input into numbers, names, operators, parentheses and commas. It checks that operands and operators alternate, so input like `2 3 +` or `max(1,,2)` is a tokenization error. A `-` or `+` where an operand is expected is unary: `-` becomes a negation operator, `+` is dropped.
+
+### 2. Shunting Yard Algorithm
+
+Converts infix notation to Reverse Polish Notation (postfix), recording how many arguments each function call has:
 
 ```
 Input:  (2 + 3) * 4
 Output: 2 3 + 4 *
 ```
 
-### 2. RPN Stack Evaluation
+### 3. Name Resolution
+
+Looks up each variable and function the expression uses, in the order under [Name Resolution](#name-resolution).
+
+### 4. RPN Stack Evaluation
 
 Evaluates postfix using a stack:
 
@@ -246,30 +267,39 @@ Token   Stack
 *       [20]      <- pop 5,4; push 20
 ```
 
+If the final result is NaN or ±Inf, evaluation returns an error instead (see [Error Handling](#error-handling)).
+
 ## Error Handling
 
+Every error starts with the stage that failed: `tokenization error:`, `parsing error:` or `evaluation error:`.
+
 ```go
-result, err := gorpn.Eval("1 / 0", nil)
+_, err := gorpn.Eval("2 +", nil)
+if err != nil {
+    // "tokenization error: unexpected end of expression"
+}
+
+_, err = gorpn.Eval("1 / 0", nil)
 if err != nil {
     // "evaluation error: division by zero"
 }
 
-result, err = gorpn.Eval("sqrt(-1)", nil)
+_, err = gorpn.Eval("sqrt(-1)", nil)
 if err != nil {
     // "evaluation error: error in function sqrt: sqrt of negative number"
 }
 
-result, err = gorpn.Eval("5 % 0", nil)
+_, err = gorpn.Eval("5 % 0", nil)
 if err != nil {
     // "evaluation error: result is not a finite number: NaN"
 }
 
-result, err = gorpn.Eval("x + 1", nil)
+_, err = gorpn.Eval("x + 1", nil)
 if err != nil {
     // "evaluation error: undefined variable: x"
 }
 
-result, err = gorpn.Eval("(2 + 3", nil)
+_, err = gorpn.Eval("(2 + 3", nil)
 if err != nil {
     // "parsing error: mismatched parentheses: extra '('"
 }
