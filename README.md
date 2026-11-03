@@ -80,6 +80,34 @@ bmi, _ := calc.Evaluate("mass / height^2")
 calc.ClearVariables()
 ```
 
+### Name Resolution
+
+A name in an expression resolves in this order: variables passed to the call (`EvaluateWithVars`, `Eval`, `Expr.Eval`), then the Calculator's variables, then the built-in constants. So a variable named `pi`, `e` or `phi` overrides the constant. Custom functions override built-in functions of the same name.
+
+Each evaluation looks names up once, when it starts. A custom function that changes the Calculator (`SetVariable`, `ClearVariables`, `RegisterFunction`) or the `vars` map mid-evaluation doesn't affect the rest of that evaluation. The next evaluation sees the change.
+
+A Calculator is not safe for concurrent use while it is being modified. Concurrent evaluations are fine as long as nothing changes the Calculator or the `vars` maps they use at the same time.
+
+### Compiled Expressions
+
+Parse an expression once and evaluate it many times, e.g. the same formula over many records:
+
+```go
+calc := gorpn.New()
+calc.SetVariable("rate", 0.23)
+
+expr, err := calc.Compile("price * (1 + rate)")
+if err != nil {
+    // "tokenization error: ..." or "parsing error: ..."
+}
+for _, price := range prices {
+    total, err := expr.Eval(map[string]float64{"price": price})
+    // ...
+}
+```
+
+`c.Compile(expr)` followed by `Eval(vars)` gives the same result as `c.EvaluateWithVars(expr, vars)`. Each `Eval` sees the Calculator's variables and functions as they are when it starts. The package-level `gorpn.Compile` uses built-in functions and constants only. An `*Expr` never changes after `Compile`, so goroutines can share it.
+
 ### Custom Functions
 
 ```go
@@ -259,6 +287,9 @@ func Eval(expression string, vars map[string]float64) (float64, error)
 
 // One-off with custom functions
 func EvalWithFunctions(expression string, vars map[string]float64, functions map[string]Function) (float64, error)
+
+// Parse once, evaluate many times (built-ins only)
+func Compile(expression string) (*Expr, error)
 ```
 
 ### Calculator Type
@@ -274,6 +305,14 @@ func (c *Calculator) SetVariables(vars map[string]float64)
 func (c *Calculator) ClearVariables()
 
 func (c *Calculator) RegisterFunction(name string, argCount int, fn func(args []float64) (float64, error))
+
+func (c *Calculator) Compile(expression string) (*Expr, error)
+```
+
+### Expr Type
+
+```go
+func (e *Expr) Eval(vars map[string]float64) (float64, error)
 ```
 
 ### Function Type
