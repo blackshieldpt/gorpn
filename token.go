@@ -2,60 +2,59 @@ package gorpn
 
 import (
 	"fmt"
-	"strings"
 	"unicode"
 )
 
-type TokenType int
+type tokenType int
 
 const (
-	TokenNumber TokenType = iota
-	TokenOperator
-	TokenLeftParen
-	TokenRightParen
-	TokenFunction
-	TokenVariable
-	TokenComma
+	tokenNumber tokenType = iota
+	tokenOperator
+	tokenLeftParen
+	tokenRightParen
+	tokenFunction
+	tokenVariable
+	tokenComma
 )
 
-type Token struct {
-	Type  TokenType
+type token struct {
+	Type  tokenType
 	Value string
 }
 
-func (t Token) String() string {
+func (t token) String() string {
 	return fmt.Sprintf("{%v: %s}", t.Type, t.Value)
 }
 
-type Tokenizer struct {
+type tokenizer struct {
 	input string
 	pos   int
 }
 
-func NewTokenizer(input string) *Tokenizer {
-	return &Tokenizer{input: input, pos: 0}
+func newTokenizer(input string) *tokenizer {
+	return &tokenizer{input: input, pos: 0}
 }
 
-func (t *Tokenizer) peek() rune {
+func (t *tokenizer) peek() rune {
 	if t.pos >= len(t.input) {
 		return 0
 	}
 	return rune(t.input[t.pos])
 }
 
-func (t *Tokenizer) advance() rune {
+func (t *tokenizer) advance() rune {
 	ch := t.peek()
 	t.pos++
 	return ch
 }
 
-func (t *Tokenizer) skipWhitespace() {
+func (t *tokenizer) skipWhitespace() {
 	for t.pos < len(t.input) && unicode.IsSpace(rune(t.input[t.pos])) {
 		t.pos++
 	}
 }
 
-func (t *Tokenizer) readNumber() string {
+func (t *tokenizer) readNumber() string {
 	start := t.pos
 	hasDecimal := false
 
@@ -85,7 +84,7 @@ func (t *Tokenizer) readNumber() string {
 	return t.input[start:t.pos]
 }
 
-func (t *Tokenizer) readIdentifier() string {
+func (t *tokenizer) readIdentifier() string {
 	start := t.pos
 	for t.pos < len(t.input) {
 		ch := rune(t.input[t.pos])
@@ -102,8 +101,8 @@ func isOperator(ch rune) bool {
 	return ch == '+' || ch == '-' || ch == '*' || ch == '/' || ch == '^' || ch == '%'
 }
 
-func (t *Tokenizer) Tokenize() ([]Token, error) {
-	var tokens []Token
+func (t *tokenizer) Tokenize() ([]token, error) {
+	var tokens []token
 
 	for {
 		t.skipWhitespace()
@@ -115,7 +114,7 @@ func (t *Tokenizer) Tokenize() ([]Token, error) {
 
 		// Number
 		if unicode.IsDigit(ch) || (ch == '.' && t.pos+1 < len(t.input) && unicode.IsDigit(rune(t.input[t.pos+1]))) {
-			tokens = append(tokens, Token{Type: TokenNumber, Value: t.readNumber()})
+			tokens = append(tokens, token{Type: tokenNumber, Value: t.readNumber()})
 			continue
 		}
 
@@ -125,9 +124,9 @@ func (t *Tokenizer) Tokenize() ([]Token, error) {
 			t.skipWhitespace()
 			// If followed by '(', it's a function
 			if t.peek() == '(' {
-				tokens = append(tokens, Token{Type: TokenFunction, Value: ident})
+				tokens = append(tokens, token{Type: tokenFunction, Value: ident})
 			} else {
-				tokens = append(tokens, Token{Type: TokenVariable, Value: ident})
+				tokens = append(tokens, token{Type: tokenVariable, Value: ident})
 			}
 			continue
 		}
@@ -136,9 +135,9 @@ func (t *Tokenizer) Tokenize() ([]Token, error) {
 		if isOperator(ch) {
 			// Handle unary minus/plus
 			if (ch == '-' || ch == '+') && (len(tokens) == 0 ||
-				tokens[len(tokens)-1].Type == TokenOperator ||
-				tokens[len(tokens)-1].Type == TokenLeftParen ||
-				tokens[len(tokens)-1].Type == TokenComma) {
+				tokens[len(tokens)-1].Type == tokenOperator ||
+				tokens[len(tokens)-1].Type == tokenLeftParen ||
+				tokens[len(tokens)-1].Type == tokenComma) {
 
 				sign := t.advance()
 				t.skipWhitespace()
@@ -149,42 +148,42 @@ func (t *Tokenizer) Tokenize() ([]Token, error) {
 					if sign == '-' {
 						num = "-" + num
 					}
-					tokens = append(tokens, Token{Type: TokenNumber, Value: num})
+					tokens = append(tokens, token{Type: tokenNumber, Value: num})
 				} else if unicode.IsLetter(t.peek()) || t.peek() == '_' {
 					// Unary operator before variable/function - insert 0 for subtraction
 					if sign == '-' {
-						tokens = append(tokens, Token{Type: TokenNumber, Value: "0"})
-						tokens = append(tokens, Token{Type: TokenOperator, Value: "-"})
+						tokens = append(tokens, token{Type: tokenNumber, Value: "0"})
+						tokens = append(tokens, token{Type: tokenOperator, Value: "-"})
 					}
 					// For unary +, just continue (it's a no-op)
 				} else if t.peek() == '(' {
 					// Unary operator before parenthesis
 					if sign == '-' {
-						tokens = append(tokens, Token{Type: TokenNumber, Value: "-1"})
-						tokens = append(tokens, Token{Type: TokenOperator, Value: "*"})
+						tokens = append(tokens, token{Type: tokenNumber, Value: "-1"})
+						tokens = append(tokens, token{Type: tokenOperator, Value: "*"})
 					}
 				} else {
 					return nil, fmt.Errorf("unexpected character after unary operator at position %d", t.pos)
 				}
 				continue
 			}
-			tokens = append(tokens, Token{Type: TokenOperator, Value: string(t.advance())})
+			tokens = append(tokens, token{Type: tokenOperator, Value: string(t.advance())})
 			continue
 		}
 
 		// Parentheses
 		if ch == '(' {
-			tokens = append(tokens, Token{Type: TokenLeftParen, Value: string(t.advance())})
+			tokens = append(tokens, token{Type: tokenLeftParen, Value: string(t.advance())})
 			continue
 		}
 		if ch == ')' {
-			tokens = append(tokens, Token{Type: TokenRightParen, Value: string(t.advance())})
+			tokens = append(tokens, token{Type: tokenRightParen, Value: string(t.advance())})
 			continue
 		}
 
 		// Comma (function argument separator)
 		if ch == ',' {
-			tokens = append(tokens, Token{Type: TokenComma, Value: string(t.advance())})
+			tokens = append(tokens, token{Type: tokenComma, Value: string(t.advance())})
 			continue
 		}
 
@@ -192,12 +191,4 @@ func (t *Tokenizer) Tokenize() ([]Token, error) {
 	}
 
 	return tokens, nil
-}
-
-func TokensToString(tokens []Token) string {
-	var parts []string
-	for _, t := range tokens {
-		parts = append(parts, t.Value)
-	}
-	return strings.Join(parts, " ")
 }

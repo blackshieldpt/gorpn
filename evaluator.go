@@ -202,118 +202,8 @@ var builtinConstants = map[string]float64{
 	"PHI": math.Phi,
 }
 
-// EvaluateRPN evaluates an RPN (postfix) expression
-func EvaluateRPN(tokens []Token, variables map[string]float64, customFunctions map[string]Function) (float64, error) {
-	var stack []float64
-
-	// Merge builtin constants with user variables (user variables take precedence)
-	vars := make(map[string]float64)
-	for k, v := range builtinConstants {
-		vars[k] = v
-	}
-	for k, v := range variables {
-		vars[k] = v
-	}
-
-	// Merge builtin functions with custom functions (custom take precedence)
-	functions := make(map[string]Function)
-	for k, v := range builtinFunctions {
-		functions[k] = v
-	}
-	for k, v := range customFunctions {
-		functions[k] = v
-	}
-
-	for _, token := range tokens {
-		switch token.Type {
-		case TokenNumber:
-			val, err := strconv.ParseFloat(token.Value, 64)
-			if err != nil {
-				return 0, fmt.Errorf("invalid number: %s", token.Value)
-			}
-			stack = append(stack, val)
-
-		case TokenVariable:
-			val, ok := vars[token.Value]
-			if !ok {
-				return 0, fmt.Errorf("undefined variable: %s", token.Value)
-			}
-			stack = append(stack, val)
-
-		case TokenOperator:
-			if len(stack) < 2 {
-				return 0, fmt.Errorf("insufficient operands for operator: %s", token.Value)
-			}
-			b := stack[len(stack)-1]
-			a := stack[len(stack)-2]
-			stack = stack[:len(stack)-2]
-
-			var result float64
-			switch token.Value {
-			case "+":
-				result = a + b
-			case "-":
-				result = a - b
-			case "*":
-				result = a * b
-			case "/":
-				if b == 0 {
-					return 0, fmt.Errorf("division by zero")
-				}
-				result = a / b
-			case "%":
-				result = math.Mod(a, b)
-			case "^":
-				result = math.Pow(a, b)
-			default:
-				return 0, fmt.Errorf("unknown operator: %s", token.Value)
-			}
-			stack = append(stack, result)
-
-		case TokenFunction:
-			fn, ok := functions[token.Value]
-			if !ok {
-				return 0, fmt.Errorf("undefined function: %s", token.Value)
-			}
-
-			argCount := fn.ArgCount
-			if argCount == -1 {
-				// Variadic function - need to determine argument count
-				// We use a sentinel approach: count values on stack until we hit something
-				// For simplicity, variadic functions consume all available values
-				// This is a limitation - in practice, we need arg count markers
-				// Let's use a simpler approach: variadic functions are limited to stack size
-				argCount = len(stack)
-			}
-
-			if len(stack) < argCount {
-				return 0, fmt.Errorf("insufficient arguments for function %s: expected %d, got %d",
-					token.Value, argCount, len(stack))
-			}
-
-			args := make([]float64, argCount)
-			for i := argCount - 1; i >= 0; i-- {
-				args[i] = stack[len(stack)-1]
-				stack = stack[:len(stack)-1]
-			}
-
-			result, err := fn.Fn(args)
-			if err != nil {
-				return 0, fmt.Errorf("error in function %s: %w", token.Value, err)
-			}
-			stack = append(stack, result)
-		}
-	}
-
-	if len(stack) != 1 {
-		return 0, fmt.Errorf("invalid expression: stack has %d values instead of 1", len(stack))
-	}
-
-	return stack[0], nil
-}
-
-// EvaluateRPNWithArgCounts evaluates an RPN expression with explicit argument counts for functions
-func EvaluateRPNWithArgCounts(tokens []Token, argCounts map[int]int, variables map[string]float64, customFunctions map[string]Function) (float64, error) {
+// evaluateRPNWithArgCounts evaluates an RPN expression with explicit argument counts for functions
+func evaluateRPNWithArgCounts(tokens []token, argCounts map[int]int, variables map[string]float64, customFunctions map[string]Function) (float64, error) {
 	var stack []float64
 
 	// Merge builtin constants with user variables (user variables take precedence)
@@ -336,21 +226,21 @@ func EvaluateRPNWithArgCounts(tokens []Token, argCounts map[int]int, variables m
 
 	for i, token := range tokens {
 		switch token.Type {
-		case TokenNumber:
+		case tokenNumber:
 			val, err := strconv.ParseFloat(token.Value, 64)
 			if err != nil {
 				return 0, fmt.Errorf("invalid number: %s", token.Value)
 			}
 			stack = append(stack, val)
 
-		case TokenVariable:
+		case tokenVariable:
 			val, ok := vars[token.Value]
 			if !ok {
 				return 0, fmt.Errorf("undefined variable: %s", token.Value)
 			}
 			stack = append(stack, val)
 
-		case TokenOperator:
+		case tokenOperator:
 			if len(stack) < 2 {
 				return 0, fmt.Errorf("insufficient operands for operator: %s", token.Value)
 			}
@@ -380,7 +270,7 @@ func EvaluateRPNWithArgCounts(tokens []Token, argCounts map[int]int, variables m
 			}
 			stack = append(stack, result)
 
-		case TokenFunction:
+		case tokenFunction:
 			fn, ok := functions[token.Value]
 			if !ok {
 				return 0, fmt.Errorf("undefined function: %s", token.Value)

@@ -61,20 +61,20 @@ func (c *Calculator) EvaluateWithVars(expression string, vars map[string]float64
 	}
 
 	// Tokenize
-	tokenizer := NewTokenizer(expression)
+	tokenizer := newTokenizer(expression)
 	tokens, err := tokenizer.Tokenize()
 	if err != nil {
 		return 0, fmt.Errorf("tokenization error: %w", err)
 	}
 
 	// Convert to RPN with argument count tracking
-	rpn, argCounts, err := ShuntingYardWithArgCounts(tokens)
+	rpn, argCounts, err := shuntingYardWithArgCounts(tokens)
 	if err != nil {
 		return 0, fmt.Errorf("parsing error: %w", err)
 	}
 
 	// Evaluate
-	result, err := EvaluateRPNWithArgCounts(rpn, argCounts, allVars, c.functions)
+	result, err := evaluateRPNWithArgCounts(rpn, argCounts, allVars, c.functions)
 	if err != nil {
 		return 0, fmt.Errorf("evaluation error: %w", err)
 	}
