@@ -322,24 +322,30 @@ func TestErrors(t *testing.T) {
 	calc := New()
 
 	tests := []struct {
-		name string
-		expr string
+		name    string
+		expr    string
+		wantErr string
 	}{
-		{"undefined variable", "x + 1"},
-		{"undefined function", "foo(5)"},
-		{"mismatched parens 1", "(2 + 3"},
-		{"mismatched parens 2", "2 + 3)"},
-		{"division by zero", "1 / 0"},
-		{"sqrt negative", "sqrt(-1)"},
-		{"log non-positive", "log(0)"},
-		{"log negative", "log(-1)"},
+		{"undefined variable", "x + 1", "evaluation error: undefined variable: x"},
+		{"undefined function", "foo(5)", "evaluation error: undefined function: foo"},
+		{"mismatched parens 1", "(2 + 3", "parsing error: mismatched parentheses: extra '('"},
+		{"mismatched parens 2", "2 + 3)", "parsing error: mismatched parentheses: missing '('"},
+		{"division by zero", "1 / 0", "evaluation error: division by zero"},
+		{"sqrt negative", "sqrt(-1)", "evaluation error: error in function sqrt: sqrt of negative number"},
+		{"log non-positive", "log(0)", "evaluation error: error in function log: log of non-positive number"},
+		{"log negative", "log(-1)", "evaluation error: error in function log: log of non-positive number"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := calc.Evaluate(tt.expr)
 			if err == nil {
-				t.Errorf("expected error for expression: %s", tt.expr)
+				t.Fatalf("expected error for expression: %s", tt.expr)
+			}
+			// Compare the whole message: several checks can reject the same
+			// input, and only the message shows which one did
+			if err.Error() != tt.wantErr {
+				t.Errorf("got error %q, expected %q", err.Error(), tt.wantErr)
 			}
 		})
 	}
@@ -592,8 +598,11 @@ func TestNonFiniteResultsAreErrors(t *testing.T) {
 		{"double(exp(1000))", "evaluation error: result is not a finite number: +Inf"},
 		// A custom function with a finite result doesn't switch the check off
 		{"double(1) * 10 ^ 400", "evaluation error: result is not a finite number: +Inf"},
+		// A finite variable or constant doesn't switch the check off either
+		{"e ^ 1000", "evaluation error: result is not a finite number: +Inf"},
 		// Unchanged: these have their own checks, which run first
 		{"1 / 0", "evaluation error: division by zero"},
+		{"sqrt(-1)", "evaluation error: error in function sqrt: sqrt of negative number"},
 		{"log(0)", "evaluation error: error in function log: log of non-positive number"},
 		{"log10(0)", "evaluation error: error in function log10: log10 of non-positive number"},
 		{"log2(0)", "evaluation error: error in function log2: log2 of non-positive number"},
