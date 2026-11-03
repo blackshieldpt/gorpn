@@ -571,3 +571,104 @@ func TestWellFormedExpressions(t *testing.T) {
 		})
 	}
 }
+
+func TestNonFiniteResultsAreErrors(t *testing.T) {
+	funcs := map[string]Function{
+		"double": {ArgCount: 1, Fn: func(args []float64) (float64, error) { return args[0] * 2, nil }},
+	}
+	tests := []struct {
+		expr    string
+		wantErr string
+	}{
+		{"5 % 0", "evaluation error: result is not a finite number: NaN"},
+		{"10 ^ 400", "evaluation error: result is not a finite number: +Inf"},
+		{"(-8) ^ (1 / 3)", "evaluation error: result is not a finite number: NaN"},
+		{"1e308 * 10", "evaluation error: result is not a finite number: +Inf"},
+		{"-(1e308 * 10)", "evaluation error: result is not a finite number: -Inf"},
+		{"mod(5, 0)", "evaluation error: result is not a finite number: NaN"},
+		{"asin(2)", "evaluation error: result is not a finite number: NaN"},
+		{"exp(1000)", "evaluation error: result is not a finite number: +Inf"},
+		// A custom function that only passes an overflow through doesn't hide it
+		{"double(exp(1000))", "evaluation error: result is not a finite number: +Inf"},
+		// A custom function with a finite result doesn't switch the check off
+		{"double(1) * 10 ^ 400", "evaluation error: result is not a finite number: +Inf"},
+		// Unchanged: these have their own checks, which run first
+		{"1 / 0", "evaluation error: division by zero"},
+		{"log(0)", "evaluation error: error in function log: log of non-positive number"},
+		{"log10(0)", "evaluation error: error in function log10: log10 of non-positive number"},
+		{"log2(0)", "evaluation error: error in function log2: log2 of non-positive number"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.expr, func(t *testing.T) {
+			_, err := EvalWithFunctions(tt.expr, nil, funcs)
+			if err == nil {
+				t.Fatalf("expected error for expression: %s", tt.expr)
+			}
+			if err.Error() != tt.wantErr {
+				t.Errorf("got error %q, expected %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestNonFiniteIntermediateResultsAreFine(t *testing.T) {
+	// Only the final result is checked, so an overflow that the rest of the
+	// expression brings back to a finite value is not an error
+	tests := []struct {
+		expr     string
+		expected float64
+	}{
+		{"1 / (1 + exp(1000))", 0},
+		{"atan(10 ^ 400)", math.Pi / 2},
+		{"min(10 ^ 400, 3)", 3},
+		{"tanh(exp(1000))", 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.expr, func(t *testing.T) {
+			result, err := Eval(tt.expr, nil)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if math.IsNaN(result) || math.Abs(result-tt.expected) > 1e-9 {
+				t.Errorf("got %v, expected %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestNonFiniteInputsPropagate(t *testing.T) {
+	calc := New()
+	calc.RegisterFunction("nan", 0, func(args []float64) (float64, error) {
+		return math.NaN(), nil
+	})
+	calc.SetVariables(map[string]float64{"inf": math.Inf(1), "notnum": math.NaN()})
+
+	tests := []struct {
+		expr     string
+		expected float64
+	}{
+		{"inf * 2", math.Inf(1)},
+		{"2 * inf", math.Inf(1)},
+		{"inf - inf", math.NaN()},
+		{"notnum + 1", math.NaN()},
+		{"abs(inf)", math.Inf(1)},
+		{"max(1, inf)", math.Inf(1)},
+		{"nan()", math.NaN()},
+		{"nan() + 1", math.NaN()},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.expr, func(t *testing.T) {
+			result, err := calc.Evaluate(tt.expr)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			same := result == tt.expected || (math.IsNaN(result) && math.IsNaN(tt.expected))
+			if !same {
+				t.Errorf("got %v, expected %v", result, tt.expected)
+			}
+		})
+	}
+}
