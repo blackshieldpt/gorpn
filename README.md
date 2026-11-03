@@ -231,6 +231,11 @@ if err != nil {
     // "evaluation error: error in function sqrt: sqrt of negative number"
 }
 
+result, err = gorpn.Eval("5 % 0", nil)
+if err != nil {
+    // "evaluation error: result is not a finite number: NaN"
+}
+
 result, err = gorpn.Eval("x + 1", nil)
 if err != nil {
     // "evaluation error: undefined variable: x"
@@ -241,6 +246,8 @@ if err != nil {
     // "parsing error: mismatched parentheses: extra '('"
 }
 ```
+
+If an expression's result is NaN or ±Inf, you get an error instead (`5 % 0`, `asin(2)`, `10 ^ 400`). Only the final result is checked, so `1 / (1 + exp(1000))` still returns 0. If the expression uses a variable that is NaN or ±Inf, or a custom function that returns one from finite arguments, the result is passed through unchecked: check it yourself if you need a finite number.
 
 ## API Reference
 

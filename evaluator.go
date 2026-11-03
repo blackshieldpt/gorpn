@@ -205,6 +205,9 @@ var builtinConstants = map[string]float64{
 // evaluateRPNWithArgCounts evaluates an RPN expression with explicit argument counts for functions
 func evaluateRPNWithArgCounts(tokens []token, argCounts map[int]int, variables map[string]float64, customFunctions map[string]Function) (float64, error) {
 	var stack []float64
+	// Set when the caller supplies NaN or ±Inf, through a variable or a custom
+	// function; the result is then passed through unchecked
+	callerNonFinite := false
 
 	// Merge builtin constants with user variables (user variables take precedence)
 	vars := make(map[string]float64)
@@ -237,6 +240,9 @@ func evaluateRPNWithArgCounts(tokens []token, argCounts map[int]int, variables m
 			val, ok := vars[token.Value]
 			if !ok {
 				return 0, fmt.Errorf("undefined variable: %s", token.Value)
+			}
+			if !isFinite(val) {
+				callerNonFinite = true
 			}
 			stack = append(stack, val)
 
@@ -315,6 +321,9 @@ func evaluateRPNWithArgCounts(tokens []token, argCounts map[int]int, variables m
 			if err != nil {
 				return 0, fmt.Errorf("error in function %s: %w", token.Value, err)
 			}
+			if _, custom := customFunctions[token.Value]; custom && !isFinite(result) && allFinite(args) {
+				callerNonFinite = true
+			}
 			stack = append(stack, result)
 		}
 	}
@@ -323,5 +332,26 @@ func evaluateRPNWithArgCounts(tokens []token, argCounts map[int]int, variables m
 		return 0, fmt.Errorf("invalid expression: stack has %d values instead of 1", len(stack))
 	}
 
+	// Only the final result is checked: an intermediate overflow can still give
+	// a finite answer, as in 1 / (1 + exp(1000))
+	if !isFinite(stack[0]) && !callerNonFinite {
+		return 0, fmt.Errorf("result is not a finite number: %v", stack[0])
+	}
+
 	return stack[0], nil
+}
+
+// isFinite reports whether v is neither NaN nor ±Inf.
+func isFinite(v float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0)
+}
+
+// allFinite reports whether every value in vs is finite.
+func allFinite(vs []float64) bool {
+	for _, v := range vs {
+		if !isFinite(v) {
+			return false
+		}
+	}
+	return true
 }
