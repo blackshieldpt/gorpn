@@ -241,6 +241,14 @@ func evaluateRPNWithArgCounts(tokens []token, argCounts map[int]int, variables m
 			stack = append(stack, val)
 
 		case tokenOperator:
+			if token.Value == opNegate {
+				if len(stack) < 1 {
+					return 0, fmt.Errorf("insufficient operands for operator: -")
+				}
+				// 0 - v, not -v: keeps the old result of +0 (not -0) for -x when x is 0
+				stack[len(stack)-1] = 0 - stack[len(stack)-1]
+				continue
+			}
 			if len(stack) < 2 {
 				return 0, fmt.Errorf("insufficient operands for operator: %s", token.Value)
 			}

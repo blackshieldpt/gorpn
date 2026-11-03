@@ -97,12 +97,23 @@ func (t *tokenizer) readIdentifier() string {
 	return t.input[start:t.pos]
 }
 
+// opNegate is the operator value for unary minus. The tokenizer creates it;
+// it never appears in input text, so it can't clash with a binary operator.
+const opNegate = "neg"
+
 func isOperator(ch rune) bool {
 	return ch == '+' || ch == '-' || ch == '*' || ch == '/' || ch == '^' || ch == '%'
 }
 
 func (t *tokenizer) Tokenize() ([]token, error) {
 	var tokens []token
+	// Operands and operators must alternate. expectOperand is true where a
+	// number, identifier, '(' or unary sign must come next.
+	expectOperand := true
+	// One entry per open '(': true when it opens a function call
+	var parens []bool
+	// True right after a call's '(' with nothing since; only then may ')' follow
+	callJustOpened := false
 
 	for {
 		t.skipWhitespace()
@@ -111,83 +122,97 @@ func (t *tokenizer) Tokenize() ([]token, error) {
 		}
 
 		ch := t.peek()
+		start := t.pos
+		afterCallOpen := callJustOpened
+		callJustOpened = false
 
 		// Number
 		if unicode.IsDigit(ch) || (ch == '.' && t.pos+1 < len(t.input) && unicode.IsDigit(rune(t.input[t.pos+1]))) {
+			if !expectOperand {
+				return nil, fmt.Errorf("unexpected number at position %d", start)
+			}
 			tokens = append(tokens, token{Type: tokenNumber, Value: t.readNumber()})
+			expectOperand = false
 			continue
 		}
 
 		// Identifier (function or variable)
 		if unicode.IsLetter(ch) || ch == '_' {
+			if !expectOperand {
+				return nil, fmt.Errorf("unexpected identifier at position %d", start)
+			}
 			ident := t.readIdentifier()
 			t.skipWhitespace()
-			// If followed by '(', it's a function
+			// If followed by '(', it's a function; the '(' is still to come
 			if t.peek() == '(' {
 				tokens = append(tokens, token{Type: tokenFunction, Value: ident})
 			} else {
 				tokens = append(tokens, token{Type: tokenVariable, Value: ident})
+				expectOperand = false
 			}
 			continue
 		}
 
 		// Operators
 		if isOperator(ch) {
-			// Handle unary minus/plus
-			if (ch == '-' || ch == '+') && (len(tokens) == 0 ||
-				tokens[len(tokens)-1].Type == tokenOperator ||
-				tokens[len(tokens)-1].Type == tokenLeftParen ||
-				tokens[len(tokens)-1].Type == tokenComma) {
-
-				sign := t.advance()
-				t.skipWhitespace()
-
-				// Check if followed by a number
-				if unicode.IsDigit(t.peek()) || t.peek() == '.' {
-					num := t.readNumber()
-					if sign == '-' {
-						num = "-" + num
-					}
-					tokens = append(tokens, token{Type: tokenNumber, Value: num})
-				} else if unicode.IsLetter(t.peek()) || t.peek() == '_' {
-					// Unary operator before variable/function - insert 0 for subtraction
-					if sign == '-' {
-						tokens = append(tokens, token{Type: tokenNumber, Value: "0"})
-						tokens = append(tokens, token{Type: tokenOperator, Value: "-"})
-					}
-					// For unary +, just continue (it's a no-op)
-				} else if t.peek() == '(' {
-					// Unary operator before parenthesis
-					if sign == '-' {
-						tokens = append(tokens, token{Type: tokenNumber, Value: "-1"})
-						tokens = append(tokens, token{Type: tokenOperator, Value: "*"})
-					}
-				} else {
-					return nil, fmt.Errorf("unexpected character after unary operator at position %d", t.pos)
+			t.advance()
+			if expectOperand {
+				// Only a sign can start an operand; unary plus is a no-op
+				if ch == '-' {
+					tokens = append(tokens, token{Type: tokenOperator, Value: opNegate})
+				} else if ch != '+' {
+					return nil, fmt.Errorf("unexpected operator '%c' at position %d", ch, start)
 				}
 				continue
 			}
-			tokens = append(tokens, token{Type: tokenOperator, Value: string(t.advance())})
+			tokens = append(tokens, token{Type: tokenOperator, Value: string(ch)})
+			expectOperand = true
 			continue
 		}
 
 		// Parentheses
 		if ch == '(' {
+			if !expectOperand {
+				return nil, fmt.Errorf("unexpected '(' at position %d", start)
+			}
+			isCall := len(tokens) > 0 && tokens[len(tokens)-1].Type == tokenFunction
+			parens = append(parens, isCall)
 			tokens = append(tokens, token{Type: tokenLeftParen, Value: string(t.advance())})
+			callJustOpened = isCall
 			continue
 		}
 		if ch == ')' {
+			// Only a call may be empty: f()
+			if expectOperand && !afterCallOpen {
+				return nil, fmt.Errorf("unexpected ')' at position %d", start)
+			}
+			// An unmatched ')' is reported by the parser
+			if len(parens) > 0 {
+				parens = parens[:len(parens)-1]
+			}
 			tokens = append(tokens, token{Type: tokenRightParen, Value: string(t.advance())})
+			expectOperand = false
 			continue
 		}
 
 		// Comma (function argument separator)
 		if ch == ',' {
+			if expectOperand {
+				return nil, fmt.Errorf("unexpected ',' at position %d", start)
+			}
+			if len(parens) == 0 || !parens[len(parens)-1] {
+				return nil, fmt.Errorf("misplaced comma at position %d: not inside a function call", start)
+			}
 			tokens = append(tokens, token{Type: tokenComma, Value: string(t.advance())})
+			expectOperand = true
 			continue
 		}
 
 		return nil, fmt.Errorf("unexpected character '%c' at position %d", ch, t.pos)
+	}
+
+	if expectOperand {
+		return nil, fmt.Errorf("unexpected end of expression")
 	}
 
 	return tokens, nil

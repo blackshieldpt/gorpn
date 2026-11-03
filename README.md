@@ -10,8 +10,8 @@ A Go package for evaluating mathematical expressions using the Shunting Yard alg
 
 ## Features
 
-- **Operator precedence**: `^` > `*` `/` `%` > `+` `-`
-- **Associativity**: Right-associative `^`, left-associative others
+- **Operator precedence**: `^` > unary `-` > `*` `/` `%` > `+` `-`
+- **Associativity**: Right-associative `^` and unary `-`, left-associative others
 - **Parentheses**: Nested expressions supported
 - **Variables**: Pass values via `map[string]float64`
 - **Built-in constants**: `pi`, `e`, `phi`
@@ -131,14 +131,15 @@ result, _ := gorpn.EvalWithFunctions("fahrenheit(100)", nil, funcs) // 212
 
 | Operator | Description | Precedence | Associativity |
 |----------|-------------|------------|---------------|
-| `^` | Power | 4 | Right |
+| `^` | Power | 5 | Right |
+| `-` (unary) | Negation | 4 | Right |
 | `*` | Multiply | 3 | Left |
 | `/` | Divide | 3 | Left |
 | `%` | Modulo | 3 | Left |
 | `+` | Add | 2 | Left |
 | `-` | Subtract | 2 | Left |
 
-Unary `-` and `+` are supported: `-5 + 3`, `-(2 + 3)`, `2 * -3`
+Unary `-` and `+` work anywhere an operand can start: `-5 + 3`, `-(2 + 3)`, `2 * -x`, `2 ^ -n`. Unary minus binds tighter than `*` `/` `%` but looser than `^`, so `-2 ^ 2` is `-4`.
 
 ## Built-in Constants
 

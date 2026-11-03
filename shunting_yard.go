@@ -22,7 +22,9 @@ var operators = map[string]operatorInfo{
 	"*": {Precedence: 3, Associativity: leftAssociative},
 	"/": {Precedence: 3, Associativity: leftAssociative},
 	"%": {Precedence: 3, Associativity: leftAssociative},
-	"^": {Precedence: 4, Associativity: rightAssociative},
+	// Unary minus binds tighter than * / % but looser than ^, so -2^2 = -(2^2)
+	opNegate: {Precedence: 4, Associativity: rightAssociative},
+	"^":      {Precedence: 5, Associativity: rightAssociative},
 }
 
 // shuntingYardWithArgCounts converts infix tokens to RPN and tracks function argument counts
@@ -65,6 +67,11 @@ func shuntingYardWithArgCounts(tokens []token) ([]token, map[int]int, error) {
 			}
 
 		case tokenOperator:
+			if token.Value == opNegate {
+				// Prefix operator: it has no left operand, so it never pops anything
+				operatorStack = append(operatorStack, token)
+				continue
+			}
 			op1 := operators[token.Value]
 			for len(operatorStack) > 0 {
 				top := operatorStack[len(operatorStack)-1]
