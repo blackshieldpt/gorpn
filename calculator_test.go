@@ -425,3 +425,149 @@ func BenchmarkVariadicFunction(b *testing.B) {
 		calc.Evaluate("max(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)")
 	}
 }
+
+func TestUnaryMinus(t *testing.T) {
+	vars := map[string]float64{"x": 3, "y": 2}
+	tests := []struct {
+		expr     string
+		expected float64
+	}{
+		{"2 * -x", -6},            // after * before a variable
+		{"10 / -y", -5},           // after / before a variable (was a division-by-zero error)
+		{"2 ^ -y", 0.25},          // after ^ before a variable
+		{"3 - -x", 6},             // after binary minus
+		{"x % -y", 1},             // after %
+		{"2 ^ -(1 + 1)", 0.25},    // after ^ before a parenthesis
+		{"2 / -(1 + 1)", -1},      // after / before a parenthesis
+		{"2 * -sqrt(4)", -4},      // before a function call
+		{"-2 ^ 2", -4},            // power binds tighter than unary minus
+		{"-y ^ 2", -4},            // same result as the literal form
+		{"2 ^ -2", 0.25},          // negated literal exponent
+		{"2 ^ -x ^ 2", 1.0 / 512}, // 2^(-(x^2))
+		{"-x * 2", -6},            // unary minus binds tighter than *
+		{"- -3", 3},               // double negation
+		{"max(-x, -1)", -1},       // inside an argument list
+		{"-2 ^ 0.5", -math.Sqrt2}, // -(2^0.5), not NaN
+	}
+
+	calc := New()
+	for _, tt := range tests {
+		t.Run(tt.expr, func(t *testing.T) {
+			result, err := calc.EvaluateWithVars(tt.expr, vars)
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
+			}
+			if math.IsNaN(result) || math.Abs(result-tt.expected) > 1e-9 {
+				t.Errorf("got %v, expected %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestUnaryMinusOfZeroIsPositiveZero(t *testing.T) {
+	result, err := Eval("-x", map[string]float64{"x": 0})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != 0 || math.Signbit(result) {
+		t.Errorf("got %v (signbit %v), expected +0", result, math.Signbit(result))
+	}
+}
+
+func TestUnaryMinusReachesFunctionDomainCheck(t *testing.T) {
+	tests := []struct {
+		expr    string
+		wantErr string
+	}{
+		{"sqrt(-1)", "evaluation error: error in function sqrt: sqrt of negative number"},
+		{"log(-1)", "evaluation error: error in function log: log of non-positive number"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.expr, func(t *testing.T) {
+			_, err := Eval(tt.expr, nil)
+			if err == nil || err.Error() != tt.wantErr {
+				t.Errorf("got %v, expected %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestMalformedExpressions(t *testing.T) {
+	tests := []struct {
+		name    string
+		expr    string
+		wantErr string
+	}{
+		{"empty expression", "", "tokenization error: unexpected end of expression"},
+		{"sign with nothing after it", "-", "tokenization error: unexpected end of expression"},
+		{"trailing operator", "2 +", "tokenization error: unexpected end of expression"},
+		{"sign before closing paren", "max(1, -)", "tokenization error: unexpected ')' at position 8"},
+		{"sign before empty parens", "5 + sum(-())", "tokenization error: unexpected ')' at position 10"},
+		{"sign before comma-only parens", "5 + sum(-(,))", "tokenization error: unexpected ',' at position 10"},
+		{"sign before operator-only parens", "sum(-(*))", "tokenization error: unexpected operator '*' at position 6"},
+		{"leading binary operator", "* 2 3", "tokenization error: unexpected operator '*' at position 0"},
+		{"juxtaposed numbers", "2 3 +", "tokenization error: unexpected number at position 2"},
+		{"juxtaposed identifiers", "x y", "tokenization error: unexpected identifier at position 2"},
+		{"juxtaposed parens", "2 (3) *", "tokenization error: unexpected '(' at position 2"},
+		{"empty parens", "()", "tokenization error: unexpected ')' at position 1"},
+		{"empty parens inside a call", "sum(())", "tokenization error: unexpected ')' at position 5"},
+		{"unary plus alone in a call", "sum(+)", "tokenization error: unexpected ')' at position 5"},
+		{"empty middle argument", "max(1,,2)", "tokenization error: unexpected ',' at position 6"},
+		{"trailing comma", "max(1,)", "tokenization error: unexpected ')' at position 6"},
+		{"leading comma", "max(,1)", "tokenization error: unexpected ',' at position 4"},
+		{"empty argument to fixed-arity function", "pow(2,,3)", "tokenization error: unexpected ',' at position 6"},
+		{"comma in grouping parens", "max((1,2))", "tokenization error: misplaced comma at position 6: not inside a function call"},
+		{"comma at top level", "1,2", "tokenization error: misplaced comma at position 1: not inside a function call"},
+		{"unmatched open paren", "(2 + 3", "parsing error: mismatched parentheses: extra '('"},
+		{"unmatched close paren", "2 + 3)", "parsing error: mismatched parentheses: missing '('"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Eval(tt.expr, nil)
+			if err == nil {
+				t.Fatalf("expected error for expression: %q", tt.expr)
+			}
+			if err.Error() != tt.wantErr {
+				t.Errorf("got error %q, expected %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestWellFormedExpressions(t *testing.T) {
+	calc := New()
+	calc.RegisterFunction("answer", 0, func(args []float64) (float64, error) {
+		return 42, nil
+	})
+
+	tests := []struct {
+		expr     string
+		expected float64
+	}{
+		{"answer()", 42},         // zero-argument call
+		{"sum()", 0},             // variadic with no arguments
+		{"sum( )", 0},            // whitespace inside an empty call
+		{"max((1 + 2), 3)", 3},   // grouping parens as an argument
+		{"max(1, (2), 3)", 3},    // grouping parens in the middle
+		{"max(-1, -2)", -1},      // unary minus arguments
+		{"max(1, min(2, 3))", 2}, // nested call
+		{"pow((1 + 1), (3))", 8}, // fixed arity with grouping parens
+		{"-(-(2))", 2},           // nested negated groups
+		{"-+3", -3},              // unary plus after unary minus
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.expr, func(t *testing.T) {
+			result, err := calc.Evaluate(tt.expr)
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
+			}
+			if math.IsNaN(result) || math.Abs(result-tt.expected) > 1e-9 {
+				t.Errorf("got %v, expected %v", result, tt.expected)
+			}
+		})
+	}
+}
